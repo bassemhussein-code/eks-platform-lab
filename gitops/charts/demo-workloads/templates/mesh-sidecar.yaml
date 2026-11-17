@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------------------
+# SIDECAR namespace traffic & security policy (classic Istio APIs)
+# ---------------------------------------------------------------------------
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: demo-sidecar
+spec:
+  mtls:
+    mode: STRICT
+{{- if .Values.exposeDemo }}
+---
+# The ALB is outside the mesh and speaks plain HTTP to the pod IP, so STRICT
+# mTLS would reject it. Allow plaintext on the app port for httpbin only.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: httpbin-alb-ingress
+  namespace: demo-sidecar
+spec:
+  selector:
+    matchLabels:
+      app: httpbin
+  mtls:
+    mode: STRICT
+  portLevelMtls:
+    8080:
+      mode: PERMISSIVE
+{{- end }}
+---
+# Retries + overall timeout on the client side
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: httpbin
+  namespace: demo-sidecar
+spec:
+  hosts:
+    - httpbin
+  http:
+    - timeout: 6s
+      retries:
+        attempts: 3
+        perTryTimeout: 2s
+        retryOn: 5xx,connect-failure,reset
+      route:
+        - destination:
+            host: httpbin
+            port:
+              number: 8000
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: httpbin
+  namespace: demo-sidecar
+spec:
+  host: httpbin
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 50
+      http:
+        http1MaxPendingRequests: 20
+        maxRequestsPerConnection: 10
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50

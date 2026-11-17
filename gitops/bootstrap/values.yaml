@@ -1,0 +1,62 @@
+# -----------------------------------------------------------------------------
+# These first values are injected by Terraform (modules/argocd) -- don't edit here.
+# -----------------------------------------------------------------------------
+repoURL: ""
+targetRevision: main
+cluster:
+  name: ""
+  region: ""
+  accountId: ""
+  vpcId: ""
+  karpenter:
+    queueName: ""
+    nodeRoleName: ""
+
+# -----------------------------------------------------------------------------
+# Add-on catalog: one place to toggle components and control versions.
+# Wave order:  0 CRDs + controllers that create nodes/LBs
+#              1 Karpenter config, Istio base, monitoring stack
+#              2 istiod, Kyverno
+#              3 Istio data plane, policies, Falco, mesh monitoring
+#              5 demo workloads
+#
+# Versions: "1.30.*" style constraints are allowed by Argo for Helm charts.
+# In production you pin EXACT versions and bump them via pull request
+# (Renovate/Dependabot). Lesson 9 makes you do that.
+# -----------------------------------------------------------------------------
+addons:
+  gatewayApiCrds:
+    enabled: true
+    version: v1.3.0
+  awsLoadBalancerController:
+    enabled: true
+    chartVersion: "1.*"
+  karpenter:
+    enabled: true
+    chartVersion: "1.15.0"
+  karpenterConfig:
+    enabled: true
+  istio:
+    enabled: true
+    # Istio 1.30 supports Kubernetes 1.32-1.36. Before upgrading EKS to 1.37 you
+    # must move to Istio 1.31+, whose charts moved to a new location (lesson 10).
+    chartVersion: "1.30.*"
+    repoURL: https://istio-release.storage.googleapis.com/charts
+  kubePrometheusStack:
+    enabled: true
+    chartVersion: "*"
+  kyverno:
+    enabled: true
+    chartVersion: "3.*"
+  kyvernoPolicies:
+    enabled: true
+  falco:
+    enabled: true
+    chartVersion: "*"
+  istioMonitoring:
+    enabled: true
+  demoWorkloads:
+    enabled: true
+    # Lesson 3: set exposeDemo=true to publish httpbin through an ALB
+    exposeDemo: false
+    allowedCidr: "0.0.0.0/0"   # put your IP/32 here when you expose it

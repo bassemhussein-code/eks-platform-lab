@@ -1,0 +1,28 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-team-label
+  annotations:
+    policies.kyverno.io/title: Require team label
+    policies.kyverno.io/category: Governance
+    policies.kyverno.io/description: >-
+      Ownership labels drive cost allocation, alert routing and incident triage.
+spec:
+  background: true
+  rules:
+    - name: check-team-label
+      match:
+        any:
+          - resources:
+              kinds: [Deployment, StatefulSet, DaemonSet]
+      exclude:
+        any:
+          - resources:
+              namespaces: [kube-system, kube-node-lease, istio-system, kyverno, falco, monitoring, argocd]
+      validate:
+        failureAction: Audit
+        message: "The label 'team' is required on workloads."
+        pattern:
+          metadata:
+            labels:
+              team: "?*"

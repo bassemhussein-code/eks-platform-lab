@@ -1,0 +1,52 @@
+# IRSA demo: the annotation tells the EKS pod identity webhook to inject
+# AWS_ROLE_ARN + AWS_WEB_IDENTITY_TOKEN_FILE into the pod. The AWS SDK/CLI then
+# calls sts:AssumeRoleWithWebIdentity automatically.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: s3-reader
+  namespace: demo-ambient
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::{{ .Values.accountId }}:role/{{ .Values.clusterName }}-demo-s3-reader
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s3-reader
+  namespace: demo-ambient
+  labels:
+    app: s3-reader
+    team: platform-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: s3-reader
+  template:
+    metadata:
+      labels:
+        app: s3-reader
+    spec:
+      serviceAccountName: s3-reader
+      containers:
+        - name: aws
+          image: {{ .Values.images.awscli }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              while true; do
+                echo "--- whoami ---"
+                aws sts get-caller-identity
+                echo "--- read s3://{{ .Values.clusterName }}-demo-{{ .Values.accountId }}/hello.txt ---"
+                aws s3 cp s3://{{ .Values.clusterName }}-demo-{{ .Values.accountId }}/hello.txt -
+                sleep 60
+              done
+          env:
+            - name: AWS_REGION
+              value: {{ .Values.region }}
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi

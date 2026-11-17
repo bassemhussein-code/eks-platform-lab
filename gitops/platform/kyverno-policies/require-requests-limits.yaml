@@ -1,0 +1,36 @@
+# All policies start in Audit mode (report, don't block). Lesson 7: read the
+# PolicyReports, fix violations, then flip failureAction to Enforce.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-requests-limits
+  annotations:
+    policies.kyverno.io/title: Require requests and memory limits
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/description: >-
+      Pods without requests break scheduling and Karpenter bin-packing; pods
+      without memory limits can OOM their neighbours.
+spec:
+  background: true
+  rules:
+    - name: validate-resources
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              namespaces: [kube-system, kube-node-lease, istio-system, kyverno, falco, monitoring, argocd]
+      validate:
+        failureAction: Audit
+        message: "Every container needs cpu+memory requests and a memory limit."
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  requests:
+                    cpu: "?*"
+                    memory: "?*"
+                  limits:
+                    memory: "?*"

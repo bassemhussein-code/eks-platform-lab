@@ -1,0 +1,165 @@
+{{- $a := .Values.addons -}}
+{{- $c := .Values.cluster -}}
+
+{{- if $a.istio.enabled }}
+---
+# Istio CNI node agent: sets up traffic redirection into ztunnel (ambient)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istio-cni
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: {{ $a.istio.repoURL }}
+    chart: cni
+    targetRevision: {{ $a.istio.chartVersion | quote }}
+    helm:
+      valuesObject:
+        profile: ambient
+  destination:
+    {{- include "lab.destination" "istio-system" | nindent 4 }}
+  syncPolicy:
+    {{- include "lab.syncPolicy" . | nindent 4 }}
+---
+# ztunnel: per-node L4 proxy (mTLS, L4 authz, telemetry) for ambient workloads
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ztunnel
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: {{ $a.istio.repoURL }}
+    chart: ztunnel
+    targetRevision: {{ $a.istio.chartVersion | quote }}
+  destination:
+    {{- include "lab.destination" "istio-system" | nindent 4 }}
+  syncPolicy:
+    {{- include "lab.syncPolicy" . | nindent 4 }}
+{{- end }}
+
+{{- if $a.istioMonitoring.enabled }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istio-monitoring
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repoURL }}
+    targetRevision: {{ .Values.targetRevision }}
+    path: gitops/platform/istio-monitoring
+  destination:
+    {{- include "lab.destination" "istio-system" | nindent 4 }}
+  syncPolicy:
+    {{- include "lab.syncPolicy" . | nindent 4 }}
+{{- end }}
+
+{{- if $a.kyvernoPolicies.enabled }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno-policies
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repoURL }}
+    targetRevision: {{ .Values.targetRevision }}
+    path: gitops/platform/kyverno-policies
+  destination:
+    {{- include "lab.destination" "kyverno" | nindent 4 }}
+  syncPolicy:
+    {{- include "lab.syncPolicy" . | nindent 4 }}
+{{- end }}
+
+{{- if $a.falco.enabled }}
+---
+# Falco: runtime threat detection (syscalls via modern eBPF probe)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: falco
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://falcosecurity.github.io/charts
+    chart: falco
+    targetRevision: {{ $a.falco.chartVersion | quote }}
+    helm:
+      valuesObject:
+        driver:
+          kind: modern_ebpf
+        tty: true
+        falco:
+          json_output: true
+        customRules:
+          lab-rules.yaml: |-
+            - rule: Package manager run in container
+              desc: >
+                A package manager ran inside a running container. Images should be
+                immutable -- installing packages at runtime is drift or an attacker.
+              condition: >
+                spawned_process and container
+                and proc.name in (apt, apt-get, apk, yum, dnf, pip, pip3)
+              output: >
+                Package manager run in container (user=%user.name cmd=%proc.cmdline
+                pod=%k8s.pod.name ns=%k8s.ns.name image=%container.image.repository)
+              priority: WARNING
+              tags: [lab, drift, mitre_persistence]
+  destination:
+    {{- include "lab.destination" "falco" | nindent 4 }}
+  syncPolicy:
+    {{- include "lab.syncPolicy" . | nindent 4 }}
+{{- end }}
+
+{{- if $a.demoWorkloads.enabled }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: demo-workloads
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repoURL }}
+    targetRevision: {{ .Values.targetRevision }}
+    path: gitops/charts/demo-workloads
+    helm:
+      valuesObject:
+        clusterName: {{ $c.name }}
+        accountId: {{ $c.accountId | quote }}
+        region: {{ $c.region }}
+        exposeDemo: {{ $a.demoWorkloads.exposeDemo }}
+        allowedCidr: {{ $a.demoWorkloads.allowedCidr | quote }}
+  destination:
+    {{- include "lab.destination" "default" | nindent 4 }}
+  syncPolicy:
+    {{- include "lab.syncPolicy" . | nindent 4 }}
+{{- end }}

@@ -1,0 +1,98 @@
+{{- $a := .Values.addons -}}
+{{- $c := .Values.cluster -}}
+
+{{- if $a.gatewayApiCrds.enabled }}
+---
+# Gateway API CRDs: Istio ambient waypoints and HTTPRoute need them.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gateway-api-crds
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kubernetes-sigs/gateway-api
+    targetRevision: {{ $a.gatewayApiCrds.version }}
+    path: config/crd/standard
+  destination:
+    {{- include "lab.destination" "default" | nindent 4 }}
+  syncPolicy:
+    {{- include "lab.syncPolicy" . | nindent 4 }}
+{{- end }}
+
+{{- if $a.awsLoadBalancerController.enabled }}
+---
+# AWS Load Balancer Controller: Ingress -> ALB, Service type=LoadBalancer -> NLB.
+# Its IAM permissions come from a Pod Identity association made in Terraform.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aws-load-balancer-controller
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://aws.github.io/eks-charts
+    chart: aws-load-balancer-controller
+    targetRevision: {{ $a.awsLoadBalancerController.chartVersion | quote }}
+    helm:
+      valuesObject:
+        clusterName: {{ $c.name }}
+        region: {{ $c.region }}
+        vpcId: {{ $c.vpcId }}
+        serviceAccount:
+          create: true
+          name: aws-load-balancer-controller   # must match the Pod Identity association
+        nodeSelector:
+          workload-type: system
+  destination:
+    {{- include "lab.destination" "kube-system" | nindent 4 }}
+  syncPolicy:
+    {{- include "lab.syncPolicy" . | nindent 4 }}
+{{- end }}
+
+{{- if $a.karpenter.enabled }}
+---
+# Karpenter controller. Runs on the static system node group, never on nodes it manages.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: karpenter
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: public.ecr.aws/karpenter     # OCI registry (repo secret created by Terraform)
+    chart: karpenter
+    targetRevision: {{ $a.karpenter.chartVersion | quote }}
+    helm:
+      valuesObject:
+        settings:
+          clusterName: {{ $c.name }}
+          interruptionQueue: {{ $c.karpenter.queueName }}  # Spot interruption / rebalance events
+        serviceAccount:
+          name: karpenter                  # must match the Pod Identity association
+        nodeSelector:
+          karpenter.sh/controller: "true"
+        controller:
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 512Mi
+  destination:
+    {{- include "lab.destination" "kube-system" | nindent 4 }}
+  syncPolicy:
+    {{- include "lab.syncPolicy" . | nindent 4 }}
+{{- end }}

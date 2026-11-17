@@ -1,0 +1,28 @@
+{{- if .Values.exposeDemo }}
+# AWS Load Balancer Controller turns this Ingress into an internet-facing ALB.
+# target-type: ip -> ALB sends traffic straight to pod IPs (VPC CNI makes pods
+# routable), skipping the NodePort hop.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: httpbin
+  namespace: demo-sidecar
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/inbound-cidrs: {{ .Values.allowedCidr | quote }}
+    alb.ingress.kubernetes.io/healthcheck-path: /status/200
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: httpbin
+                port:
+                  number: 8000
+{{- end }}

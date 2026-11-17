@@ -1,0 +1,5 @@
+apiVersion: v2
+name: root-app
+description: Renders the single root Argo CD Application (app-of-apps entry point)
+type: application
+version: 0.1.0

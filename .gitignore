@@ -1,0 +1,9 @@
+.terraform/
+.terragrunt-cache/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfplan
+backend.tf
+provider_aws.tf
+.DS_Store

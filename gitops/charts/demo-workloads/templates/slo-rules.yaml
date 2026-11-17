@@ -1,0 +1,51 @@
+{{- $budget := .Values.slo.errorBudget -}}
+# SLO: {{ .Values.slo.objectivePercent }}% of httpbin requests are non-5xx.
+# Error budget = 1 - SLO. Burn rate = how fast we consume the budget
+# (burn rate 1 = budget used up exactly at the end of the 30-day window).
+#
+# Multi-window, multi-burn-rate alerts (Google SRE workbook):
+#   fast burn: 14.4x over 1h (confirmed by 5m)  -> 2% of monthly budget in 1h -> PAGE
+#   slow burn:   6x over 6h (confirmed by 30m)  -> 5% of monthly budget in 6h -> TICKET
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: httpbin-slo
+  namespace: demo-ambient
+spec:
+  groups:
+    - name: httpbin-slo.recording
+      rules:
+{{- range $w := list "5m" "30m" "1h" "6h" }}
+        - record: slo:httpbin_error_ratio:rate{{ $w }}
+          expr: |
+            sum by (destination_service_namespace) (
+              rate(istio_requests_total{destination_service_name="httpbin", response_code=~"5.."}[{{ $w }}])
+            )
+            /
+            sum by (destination_service_namespace) (
+              rate(istio_requests_total{destination_service_name="httpbin"}[{{ $w }}])
+            )
+{{- end }}
+    - name: httpbin-slo.alerts
+      rules:
+        - alert: HttpbinErrorBudgetFastBurn
+          expr: |
+            slo:httpbin_error_ratio:rate1h > (14.4 * {{ $budget }})
+            and
+            slo:httpbin_error_ratio:rate5m > (14.4 * {{ $budget }})
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "httpbin in {{`{{ $labels.destination_service_namespace }}`}} is burning its error budget fast"
+            description: "Error ratio is above 14.4x the budget rate. At this pace the 30-day budget is gone in ~2 days."
+        - alert: HttpbinErrorBudgetSlowBurn
+          expr: |
+            slo:httpbin_error_ratio:rate6h > (6 * {{ $budget }})
+            and
+            slo:httpbin_error_ratio:rate30m > (6 * {{ $budget }})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "httpbin in {{`{{ $labels.destination_service_namespace }}`}} is slowly burning its error budget"

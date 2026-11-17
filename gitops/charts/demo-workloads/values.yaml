@@ -1,0 +1,16 @@
+clusterName: ""
+accountId: ""
+region: ""
+
+exposeDemo: false
+allowedCidr: "0.0.0.0/0"
+
+images:
+  httpbin: mccutchen/go-httpbin:v2.15.0
+  curl: curlimages/curl:8.11.1
+  awscli: amazon/aws-cli:2.22.0
+
+# SLO: 99.5% of httpbin requests succeed (non-5xx) over 30 days
+slo:
+  objectivePercent: "99.5"
+  errorBudget: "0.005"   # = 1 - 0.995

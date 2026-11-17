@@ -1,0 +1,90 @@
+# ---------------------------------------------------------------------------
+# AMBIENT namespace traffic & security policy
+# ---------------------------------------------------------------------------
+
+# Waypoint proxy for the namespace (L7 processing for services in it)
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: waypoint
+  namespace: demo-ambient
+  labels:
+    istio.io/waypoint-for: service
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE
+---
+# mTLS STRICT: plaintext traffic into this namespace is rejected
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: demo-ambient
+spec:
+  mtls:
+    mode: STRICT
+---
+# L7 authorization enforced by the waypoint: only the traffic-client identity
+# (SPIFFE id from its ServiceAccount) may call httpbin, and only with GET.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: httpbin-allow-client-get
+  namespace: demo-ambient
+spec:
+  targetRefs:
+    - kind: Service
+      group: ""
+      name: httpbin
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/demo-ambient/sa/traffic-client
+      to:
+        - operation:
+            methods: ["GET"]
+---
+# Timeouts in ambient are configured with Gateway API HTTPRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: httpbin
+  namespace: demo-ambient
+spec:
+  parentRefs:
+    - group: ""
+      kind: Service
+      name: httpbin
+      port: 8000
+  rules:
+    - backendRefs:
+        - name: httpbin
+          port: 8000
+      timeouts:
+        request: 3s
+---
+# Circuit breaking: connection limits + outlier detection (eject bad pods)
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: httpbin
+  namespace: demo-ambient
+spec:
+  host: httpbin.demo-ambient.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 50
+      http:
+        http1MaxPendingRequests: 20
+        maxRequestsPerConnection: 10
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50

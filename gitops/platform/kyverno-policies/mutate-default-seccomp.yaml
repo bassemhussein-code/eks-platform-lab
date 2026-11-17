@@ -1,0 +1,26 @@
+# A MUTATING policy (Kyverno can change resources, not only validate them):
+# give every Pod the RuntimeDefault seccomp profile unless it set one itself.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-default-seccomp
+  annotations:
+    policies.kyverno.io/title: Add RuntimeDefault seccomp profile
+    policies.kyverno.io/category: Pod Security
+spec:
+  rules:
+    - name: add-seccomp
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              namespaces: [kube-system, istio-system, falco]
+      mutate:
+        patchStrategicMerge:
+          spec:
+            securityContext:
+              +(seccompProfile):
+                type: RuntimeDefault

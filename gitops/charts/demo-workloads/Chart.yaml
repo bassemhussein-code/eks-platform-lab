@@ -1,0 +1,5 @@
+apiVersion: v2
+name: demo-workloads
+description: httpbin + traffic client in an ambient-mesh namespace and a sidecar-mesh namespace, an IRSA S3 reader, and SLO alerts
+type: application
+version: 0.1.0

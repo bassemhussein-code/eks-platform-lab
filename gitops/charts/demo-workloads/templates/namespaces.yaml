@@ -1,0 +1,19 @@
+# AMBIENT: no sidecars. ztunnel (per node) gives mTLS + L4. The waypoint
+# (per namespace) adds L7: HTTP authz, timeouts, circuit breaking, metrics.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-ambient
+  labels:
+    istio.io/dataplane-mode: ambient
+    istio.io/use-waypoint: waypoint
+    team: platform-lab
+---
+# SIDECAR: classic Istio. An Envoy is injected into every pod.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-sidecar
+  labels:
+    istio-injection: enabled
+    team: platform-lab

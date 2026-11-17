@@ -1,0 +1,144 @@
+{{- range $ns := list "demo-ambient" "demo-sidecar" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: httpbin
+  namespace: {{ $ns }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: traffic-client
+  namespace: {{ $ns }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: httpbin
+  namespace: {{ $ns }}
+  labels:
+    app: httpbin
+    team: platform-lab
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: httpbin
+  template:
+    metadata:
+      labels:
+        app: httpbin
+        version: v1
+    spec:
+      serviceAccountName: httpbin
+      # Spread replicas across AZs: one AZ failing must not take the service down
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: httpbin
+      containers:
+        - name: httpbin
+          image: {{ $.Values.images.httpbin }}
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /status/200
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /status/200
+              port: 8080
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            readOnlyRootFilesystem: true
+---
+# PDB: node drains (upgrades, Karpenter consolidation) keep >= 1 replica up
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: httpbin
+  namespace: {{ $ns }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: httpbin
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: httpbin
+  namespace: {{ $ns }}
+  labels:
+    app: httpbin
+spec:
+  selector:
+    app: httpbin
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8080
+      appProtocol: http
+---
+# Generates steady traffic (~2% errors) so dashboards and SLO alerts have data
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traffic-client
+  namespace: {{ $ns }}
+  labels:
+    app: traffic-client
+    team: platform-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: traffic-client
+  template:
+    metadata:
+      labels:
+        app: traffic-client
+    spec:
+      serviceAccountName: traffic-client
+      containers:
+        - name: curl
+          image: {{ $.Values.images.curl }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              i=0
+              while true; do
+                i=$((i+1))
+                curl -s -o /dev/null -w "GET /get -> %{http_code}\n" http://httpbin:8000/get
+                if [ $((i % 50)) -eq 0 ]; then
+                  curl -s -o /dev/null -w "GET /status/500 -> %{http_code}\n" http://httpbin:8000/status/500
+                fi
+                sleep 1
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 100
+{{- end }}

@@ -1,0 +1,6 @@
+clusterName: ""
+nodeRoleName: ""
+
+# Hard cap on what Karpenter may provision (protects your AWS bill)
+cpuLimit: "32"
+memoryLimit: 128Gi

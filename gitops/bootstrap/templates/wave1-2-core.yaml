@@ -1,0 +1,179 @@
+{{- $a := .Values.addons -}}
+{{- $c := .Values.cluster -}}
+
+{{- if $a.karpenterConfig.enabled }}
+---
+# NodePool + EC2NodeClass (needs Karpenter CRDs from wave 0)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: karpenter-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.repoURL }}
+    targetRevision: {{ .Values.targetRevision }}
+    path: gitops/charts/karpenter-config
+    helm:
+      valuesObject:
+        clusterName: {{ $c.name }}
+        nodeRoleName: {{ $c.karpenter.nodeRoleName }}
+  destination:
+    {{- include "lab.destination" "kube-system" | nindent 4 }}
+  syncPolicy:
+    {{- include "lab.syncPolicy" . | nindent 4 }}
+{{- end }}
+
+{{- if $a.kubePrometheusStack.enabled }}
+---
+# Prometheus Operator + Prometheus + Alertmanager + Grafana + node-exporter + kube-state-metrics
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: {{ $a.kubePrometheusStack.chartVersion | quote }}
+    helm:
+      valuesObject:
+        prometheus:
+          prometheusSpec:
+            # Pick up ServiceMonitors/PodMonitors/PrometheusRules from ANY namespace,
+            # not only ones labelled for this Helm release.
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            retention: 2d
+            resources:
+              requests:
+                cpu: 200m
+                memory: 1Gi
+        alertmanager:
+          alertmanagerSpec:
+            resources:
+              requests:
+                cpu: 20m
+                memory: 64Mi
+        grafana:
+          defaultDashboardsTimezone: Africa/Cairo
+  destination:
+    {{- include "lab.destination" "monitoring" | nindent 4 }}
+  syncPolicy:
+    {{- include "lab.syncPolicy" . | nindent 4 }}
+{{- end }}
+
+{{- if $a.istio.enabled }}
+---
+# Istio CRDs + cluster-wide resources
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istio-base
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: {{ $a.istio.repoURL }}
+    chart: base
+    targetRevision: {{ $a.istio.chartVersion | quote }}
+  destination:
+    {{- include "lab.destination" "istio-system" | nindent 4 }}
+  # istiod rewrites the webhook failurePolicy at runtime; without this Argo
+  # shows the app OutOfSync forever (classic Istio + Argo CD gotcha).
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      jqPathExpressions:
+        - .webhooks[]?.failurePolicy
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+---
+# Control plane in AMBIENT profile (sidecar injection still works per-namespace,
+# so the lab can show both data-plane models side by side).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istiod
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: {{ $a.istio.repoURL }}
+    chart: istiod
+    targetRevision: {{ $a.istio.chartVersion | quote }}
+    helm:
+      valuesObject:
+        profile: ambient
+        meshConfig:
+          accessLogFile: /dev/stdout   # lab: see every request in proxy logs
+        pilot:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+  destination:
+    {{- include "lab.destination" "istio-system" | nindent 4 }}
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      jqPathExpressions:
+        - .webhooks[]?.failurePolicy
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+{{- end }}
+
+{{- if $a.kyverno.enabled }}
+---
+# Kyverno admission controller (policies themselves are in wave 3)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://kyverno.github.io/kyverno/
+    chart: kyverno
+    targetRevision: {{ $a.kyverno.chartVersion | quote }}
+    helm:
+      valuesObject:
+        admissionController:
+          replicas: 1      # prod: 3 (it's in the request path of every API call it matches)
+  destination:
+    {{- include "lab.destination" "kyverno" | nindent 4 }}
+  syncPolicy:
+    {{- include "lab.syncPolicy" . | nindent 4 }}
+{{- end }}

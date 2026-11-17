@@ -1,0 +1,58 @@
+# NodePool = the Kubernetes-side "what": which instance shapes are allowed,
+# spot vs on-demand, limits, and how aggressively to consolidate.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: default
+spec:
+  template:
+    metadata:
+      labels:
+        workload-type: general
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: default
+
+      # Flexible requirements = Karpenter can pick the cheapest instance that
+      # fits the pending pods (bin-packing). Narrow lists defeat the purpose.
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot", "on-demand"]   # spot preferred when available (cheaper)
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values: ["c", "m", "r", "t"]
+        - key: karpenter.k8s.aws/instance-generation
+          operator: Gt
+          values: ["4"]
+        - key: karpenter.k8s.aws/instance-size
+          operator: NotIn
+          values: ["nano", "micro", "metal"]
+
+      # Recycle nodes at least every 30 days (patching / AMI hygiene)
+      expireAfter: 720h
+
+  limits:
+    cpu: {{ .Values.cpuLimit | quote }}
+    memory: {{ .Values.memoryLimit }}
+
+  disruption:
+    # Remove empty nodes and repack under-utilized ones onto fewer/cheaper nodes
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 1m
+    budgets:
+      # Never disrupt more than 10% of nodes at once
+      - nodes: "10%"
+      # Business-hours freeze for cost consolidation (Cairo time = UTC+2):
+      # no "Underutilized" disruptions 07:00-15:00 UTC on weekdays.
+      # Drift and emptiness are still allowed.
+      - nodes: "0"
+        schedule: "0 7 * * mon-fri"
+        duration: 8h
+        reasons:
+          - Underutilized
